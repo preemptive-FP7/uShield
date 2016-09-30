@@ -1,0 +1,77 @@
+#!/usr/bin/python
+
+import argparse
+import socket
+import sys
+import time
+import signal
+import ssl
+
+
+syslog_path = "/var/log/syslog"
+cef_socket = None
+
+
+def connect_cef_socket() :
+    global cef_socket
+    if cef_transport == "TCP" or cef_transport == "TLS" :
+        cef_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    elif cef_transport == "UDP" :
+        cef_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    if cef_transport == "TLS" :
+        cef_socket = ssl.wrap_socket(cef_socket, ssl_version=ssl.PROTOCOL_TLSv1, ciphers="ALL")
+    if cef_transport == "TCP" or cef_transport == "TLS" :
+        cef_socket.settimeout(2)
+        cef_socket.connect((cef_host,cef_port))
+
+
+def forward_to_cef(msg):
+    global cef_socket
+    try:
+        if cef_socket == None :
+            connect_cef_socket()
+        if cef_transport == "TCP" or cef_transport == "TLS" :
+            cef_socket.sendall(msg)
+        else :
+            cef_socket.sendto(msg, (cef_host,cef_port))
+    except:
+        if cef_transport == "TCP" or cef_transport == "TLS" :
+            if cef_socket != None:
+                cef_socket.close()
+            cef_socket = None
+        print "Error while sending CEF message: ", sys.exc_info()[0]
+
+
+def follow(syslog_file_path):
+    syslog_file = open(syslog_file_path, "r")
+    syslog_file.seek(0,2) # Go to the end of the file
+    while True:
+        line = syslog_file.readline()
+        if not line:
+            time.sleep(0.1) # Sleep briefly
+        else:
+            if line.find("CEF:0") != -1:
+                forward_to_cef(line)
+
+
+def signal_handler(signal, frame):
+    global cef_socket
+    print("SIGINT: exiting...")
+    if cef_socket != None:
+        cef_socket.close()
+    sys.exit(0)
+
+
+# Main
+parser = argparse.ArgumentParser(description="Forwards to a remote server all local CEF logs in /var/log/syslog")
+parser.add_argument("--host", default="localhost")
+parser.add_argument("--port", default=1514, type=int)
+parser.add_argument("--transport", default="TCP", choices=["TCP", "UDP", "TLS"])
+args = parser.parse_args()
+cef_host = args.host
+cef_port = args.port
+cef_transport = args.transport
+print "Forwarding CEF messages to " + cef_host + ":" + str(cef_port) + " using " + cef_transport
+
+signal.signal(signal.SIGINT, signal_handler)
+follow(syslog_path)

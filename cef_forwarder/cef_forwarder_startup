@@ -1,0 +1,105 @@
+#! /bin/bash
+
+
+function getPID {
+    PID=`pidof -x cef_forwarder`
+    if [ $? -ne 0 ]; then
+        #if pidof returned non-zero, the service is not running or something else is wrong
+        PID=0
+    fi
+}
+
+function waitForPID () {
+    ps -p $1 > /dev/null
+    RUNNING=$?
+    while [ $RUNNING -eq 0 ]; do
+        sleep 1
+        echo -ne "."
+        ps -p $1 > /dev/null
+        RUNNING=$?
+    done
+    echo "done."
+}
+
+function checkServiceRunning {
+    getPID
+    if [ $PID -eq 0 ]; then
+        return 1
+    fi
+    ps -p $PID > /dev/null
+    RUNNING=$?
+    if [ $RUNNING -eq 0 ]; then
+        return 0
+    fi
+    return 1
+}
+
+function startService {
+
+    /usr/local/bin/cef_forwarder --host localhost --port 1514 --transport TCP > /dev/null 2>&1 &
+}
+
+function stopService {
+
+    getPID
+    kill -s SIGINT $PID
+    waitForPID $PID
+}
+
+case "$1" in
+    status)
+        checkServiceRunning
+        if [ $? -eq 0 ]; then
+            echo "cef_forwarder service is running."
+            exit 0
+        else
+            echo "cef_forwarder service is not running."
+            exit 0
+        fi
+    ;;
+    start)
+        checkServiceRunning
+        if [ $? -eq 0 ]; then
+            echo "cef_forwarder service is already running!"
+            exit 0
+        fi
+        echo "Starting cef_forwarder service"
+        startService
+    ;;
+    stop)
+        checkServiceRunning
+        if [ $? -eq 1 ]; then
+            echo "cef_forwarder service is not runnning!"
+            exit 0
+        fi
+        echo -ne "Stopping cef_forwarder service "
+        stopService
+    ;;
+    force-stop)
+        checkServiceRunning
+        if [ $? -eq 1 ]; then
+            echo "cef_forwarder service is not runnning!"
+            exit 0
+        fi
+        echo -ne "Killing cef_forwarder service... "
+        kill -9 $PID
+        waitForPID $PID
+    ;;
+    restart)
+        checkServiceRunning
+        if [ $? -eq 1 ]; then
+            echo "cef_forwarder service is not runnning!"
+            exit 0
+        fi
+        echo -ne "Stopping cef_forwarder service "
+        stopService
+        echo "Starting cef_forwarder service"
+        startService
+    ;;
+    *)
+        echo "Usage: /etc/init.d/cef_forwarder {start|stop|restart|force-stop}"
+        exit 1
+    ;;
+esac
+
+exit 0
